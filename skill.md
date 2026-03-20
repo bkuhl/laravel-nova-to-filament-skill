@@ -1024,7 +1024,7 @@ grep -r "Nova\|nova" tests/ --include="*.php" -l
 **Detect the project's test framework before writing any test code:**
 ```bash
 # Pest
-cat composer.json | grep pestphp
+grep pestphp composer.json
 # PHPUnit
 cat phpunit.xml 2>/dev/null || cat phpunit.xml.dist 2>/dev/null
 ```
@@ -1113,7 +1113,7 @@ grep -n "indexQuery\|detailQuery\|relatableQuery\|with(\|withCount(" app/Nova/Yo
 | Search | Ensure searchable columns are indexed; avoid `LIKE '%term%'` on unindexed large text columns |
 | Filters | Check that filter query scopes use indexed columns; add DB indexes if needed |
 | RelationManagers | Each RelationManager issues its own query; add `->with()` if it displays nested relationships |
-| BelongsTo selects | Use `->searchable()->preload()` only for small reference tables; for large tables use `->searchable()` without preload to avoid loading all options at once (see §4.5) |
+| BelongsTo selects | Use `->searchable()->preload()` only for small reference tables; for large tables use `->searchable()` without preload to avoid loading all options at once (see §4.5 Map relationships) |
 | Metrics | Metric queries run on every dashboard load; ensure they use indexed columns and consider caching if the table is very large |
 
 ---
