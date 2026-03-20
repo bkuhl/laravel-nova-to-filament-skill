@@ -953,83 +953,168 @@ protected static function getNavigationBadgeColor(): ?string
 
 Run this verification workflow **after each resource is migrated** — do not wait until the full migration is done.
 
-### 13.1 Browser MCP side-by-side comparison
+### 13.1 Browser MCP setup
+
+Before attempting any browser comparison, check whether Playwright MCP (or an equivalent browser automation tool) is available in the current environment.
+
+**Check availability:**
+```bash
+# If Playwright MCP is configured, the agent will be able to drive browser tabs automatically.
+# Look for a playwright config or MCP server config in the project root.
+ls playwright.config.* mcp*.json .mcp.json 2>/dev/null
+```
+
+- **If Playwright MCP is available**: The agent can navigate both `/nova` and `/filament` simultaneously and perform automated comparisons as described in §13.2.
+- **If Playwright MCP is NOT available**: Inform the user:
+  > "Playwright MCP is not detected in this environment. I can guide you through a manual side-by-side comparison using two Chrome tabs, or you can set up Playwright MCP by following [the Playwright MCP setup guide](https://github.com/microsoft/playwright-mcp). Which would you prefer?"
+
+  Proceed with the manual checklist in §13.4 (human-verifiable section) until browser automation is available.
+
+**Finding login credentials:**
+Do not create new test accounts. Instead, inspect the project's existing database seeders to find credentials that can be used for the comparison:
+```bash
+grep -r "password\|admin\|seeder" database/seeders/ --include="*.php" -l
+```
+Use the seeded admin user (or whichever role gives full access) for the initial comparison. Adjust the role used for each authorization-sensitive check based on the roles found in the seeders.
+
+**Planning question — ask the user before starting comparison:**
+> "For the side-by-side browser comparison, what scope makes sense given your current test data and database seeds?
+> - **Read-only only** (list/detail pages, filters, search) — safe with any dataset
+> - **Include write operations** (create, edit, delete) — requires a stable seed or transaction rollback strategy
+>
+> What would you prefer for this project?"
+
+Record the user's answer and scope the automated comparison accordingly.
+
+### 13.2 Browser MCP side-by-side comparison
 
 Use browser automation (Playwright MCP or equivalent) to control the browser and drive the comparison. The agent navigates both panels simultaneously without requiring manual user interaction for every step.
 
 **Setup:**
 1. Ensure both `/nova` and `/filament` are reachable in the local environment.
-2. Create test user accounts for each role in the authorization test matrix from `migration/auth.md`.
-3. Seed a consistent, known-state dataset for comparison (use database transactions or a dedicated seed to keep it stable).
+2. Use credentials found in the project's database seeders (see §13.1).
+3. Use a consistent, known-state dataset. If the project has a dedicated seed command (e.g. `php artisan db:seed --class=TestingSeeder`), run it first. Otherwise use database transactions to keep state stable.
 
-**Automated comparison script per resource:**
-1. Log in to `/nova` in one tab and `/filament` in another using the same credentials.
+**Automated comparison per resource (read-only scope — always run):**
+1. Log in to `/nova` in one tab and `/filament` in another using the same seeded credentials.
 2. Navigate to the resource list in both panels:
    - Assert record counts match.
-   - Assert column headers and visible data match (or document equivalent differences).
+   - Assert column headers and visible data match (or document intentional differences).
    - Apply the same sort in both and assert the order matches.
    - Search for the same term in both and assert result sets match.
 3. Open the same record (by ID) in both panels:
    - Assert every field value is identical.
    - Assert restricted fields are visible/hidden correctly per role.
-4. Check each action button for every user role:
-   - Authorized roles see the action and can invoke it.
-   - Unauthorized roles do not see the action.
-5. Check filter behavior: apply each filter in both panels and assert the result sets match.
+4. Check filter behavior: apply each filter in both panels and assert the result sets match.
 
-**Shared database caution**: Both panels read and write the same database. Use **read-only operations** for side-by-side comparison. If a test requires creating or deleting a record, wrap it in a database transaction or use a dedicated test seed and clean up afterward. Do not run destructive operations on shared production-equivalent data.
+**Additional write-operation comparisons (only if user confirmed this scope in §13.1):**
+1. Create a record via Filament and verify it appears in the list and persists in the database.
+2. Edit an existing record via Filament and verify the change is reflected.
+3. If destructive operations are included, wrap each in a database transaction or use a dedicated test seed and clean up afterward. Do not run destructive operations on shared production-equivalent data.
 
-### 13.2 Automated Livewire tests
+### 13.3 Automated tests — migrate Nova tests
 
-```php
-it('can list users', function (): void {
-    $users = User::factory()->count(5)->create();
-    livewire(ListUsers::class)->assertCanSeeTableRecords($users);
-});
+**Do not create new test files.** Instead, find any existing tests that cover Nova resources and migrate them to test the equivalent Filament components.
 
-it('can create a user', function (): void {
-    livewire(CreateUser::class)
-        ->fillForm(['name' => 'John', 'email' => 'john@example.com', 'password' => 'password'])
-        ->call('create')
-        ->assertHasNoFormErrors();
-    expect(User::where('email', 'john@example.com')->exists())->toBeTrue();
-});
-
-it('hides restricted field from non-admin', function (): void {
-    actingAs(User::factory()->create(['role' => 'viewer']));
-    livewire(EditUser::class, ['record' => User::factory()->create()])
-        ->assertFormFieldIsHidden('secret_field');
-});
-
-it('can filter by status', function (): void {
-    $active = User::factory()->active()->create();
-    $inactive = User::factory()->inactive()->create();
-    livewire(ListUsers::class)
-        ->filterTable('status', 'active')
-        ->assertCanSeeTableRecords([$active])
-        ->assertCanNotSeeTableRecords([$inactive]);
-});
+**Find Nova-related tests:**
+```bash
+grep -r "Nova\|nova" tests/ --include="*.php" -l
 ```
 
-### 13.3 Acceptance checklist per resource
+**Detect the project's test framework before writing any test code:**
+```bash
+# Pest
+cat composer.json | grep pestphp
+# PHPUnit
+cat phpunit.xml 2>/dev/null || cat phpunit.xml.dist 2>/dev/null
+```
 
-Check off each item in `migration/progress.md` before declaring a resource done:
+Use whichever framework is already in use. Write migrated tests in the same style as the existing test files (same framework, same assertion style, same directory conventions).
 
-- [ ] List page renders without errors
-- [ ] All table columns display correct data
-- [ ] Sorting works on all sortable columns
-- [ ] Global search returns correct results
-- [ ] All filters narrow results correctly
-- [ ] Create form contains all required fields with correct validation
-- [ ] Edit form pre-populates existing values
-- [ ] All relationship fields load correct options
-- [ ] Conditional field visibility behaves correctly
-- [ ] All actions execute correctly (including confirmation modals and action form fields)
-- [ ] Bulk actions work on multiple records
-- [ ] Authorization rules enforced for every role in the test matrix
-- [ ] Soft delete restore/force-delete works if applicable
-- [ ] All RelationManagers display and allow editing related records
-- [ ] Browser MCP side-by-side comparison passed
+**Migration approach per test file found:**
+1. Identify the Nova resource or action the test covers.
+2. Replace Nova-specific assertions (e.g. `Nova::assertResourceExists`) with Filament equivalents (e.g. `livewire(ListUsers::class)->assertCanSeeTableRecords(...)`).
+3. Update namespaces and class references from `App\Nova\*` to `App\Filament\Resources\*`.
+4. Keep the test intent identical — do not expand or change what is being tested during migration.
+
+**Authorization — rely on policies, not acceptance tests:**
+Rather than adding new HTTP-layer authorization tests, re-review each Laravel policy class that was in use with Nova and verify it is correctly registered and applied in Filament (see §10.1). Policies are simple enough to translate directly. If a policy was covering a Nova resource, confirm that the equivalent Filament resource calls `->authorizeResourceAccess()` or uses the same policy via `->policy(UserPolicy::class)`. No additional explicit authorization acceptance tests are needed beyond what already exists in the project.
+
+### 13.4 Acceptance checklist per resource
+
+Record this checklist in `migration/progress.md` for each resource. Check off each item before declaring the resource done.
+
+#### Agent-verifiable (automated)
+
+- [ ] `php artisan filament:check` (or equivalent) reports no errors for this resource
+- [ ] List page HTTP response is 200 for an authenticated admin user
+- [ ] Record count on the list page matches the Nova list page (browser MCP comparison)
+- [ ] Column headers match or intentional differences are documented
+- [ ] Default sort order matches (or intentional difference is documented)
+- [ ] Global search for a known term returns the same record set as Nova
+- [ ] Each filter: applying in Filament returns the same record set as applying in Nova
+- [ ] Each sortable column: toggling sort in Filament returns same order as Nova
+- [ ] Detail/show page for a known record ID renders all fields without errors
+- [ ] Every field value on the detail page matches the Nova detail page for the same record
+- [ ] Create form: all required fields present; submitting with valid data creates the record (if write scope confirmed)
+- [ ] Create form: submitting with missing required fields returns validation errors
+- [ ] Edit form: opening an existing record pre-populates all fields correctly
+- [ ] Edit form: submitting a valid change persists correctly (if write scope confirmed)
+- [ ] Each action: authorized role sees the action button in the table and on the detail page
+- [ ] Each action: invoking the action produces the expected result (notification, redirect, download, etc.)
+- [ ] Each action with a confirmation modal: modal appears before execution
+- [ ] Each action with an action form: form fields render and validate correctly
+- [ ] Bulk actions: selecting multiple records and invoking a bulk action applies to all selected records
+- [ ] Each RelationManager tab renders without errors
+- [ ] Each RelationManager lists the correct related records
+- [ ] Each RelationManager: attaching/creating a related record works (if write scope confirmed)
+- [ ] Each RelationManager: detaching/deleting a related record works (if write scope confirmed)
+- [ ] Soft-delete: trashed records are hidden from the default list
+- [ ] Soft-delete: restore action restores the record
+- [ ] Soft-delete: force-delete action permanently removes the record
+- [ ] All Nova-related existing tests pass after migration (§13.3)
+- [ ] Policy registration verified for this resource (§10.1)
+- [ ] Browser MCP side-by-side comparison completed (§13.2)
+
+#### Human-verifiable (requires manual review)
+
+- [ ] Conditional field visibility behaves correctly for all role/state combinations (visually confirm in browser)
+- [ ] Restricted fields are hidden for unauthorized roles (confirm for each role in `migration/auth.md`)
+- [ ] Action buttons are absent for unauthorized roles (confirm for each role)
+- [ ] Relationship fields load correct options and are searchable where expected
+- [ ] Form UX feels equivalent — labels, placeholders, help text, field order
+- [ ] Date/time fields display in the correct format and timezone
+- [ ] Currency/number fields display with correct precision and formatting
+- [ ] File upload fields upload and display files correctly
+- [ ] Rich text / Markdown fields render content correctly
+- [ ] Navigation badge (if applicable) shows the correct count and color
+- [ ] Metric widgets (if applicable) display correct values and ranges
+- [ ] Any custom Nova Blade views or themes have an equivalent Filament implementation reviewed
+
+### 13.5 Performance review
+
+**Goal**: Match the efficiency of the existing Nova implementation — do not regress, but do not over-engineer either.
+
+**Before migrating each resource, note its existing approach:**
+```bash
+# Look at the Nova resource's indexQuery, detailQuery, relatableQuery
+grep -n "indexQuery\|detailQuery\|relatableQuery\|with(\|withCount(" app/Nova/YourResource.php
+```
+
+- If Nova used plain Eloquent with no eager loading customisation, implement Filament the same way and trust Filament's default query builder.
+- If Nova added specific `->with([...])` eager loads or `->withCount([...])` calls, replicate them in `getEloquentQuery()` (see §4.2) — they were there for a reason.
+- If Nova used highly customised raw queries or database-specific optimisations, read the comment or Git history to understand why before replicating, then aim for the same approach in Filament.
+
+**After migration, provide the user with this table of areas to review if they experience slowness on large tables:**
+
+| Area | What to check |
+|---|---|
+| List page N+1 | Add `->with([...])` in `getEloquentQuery()` for any relationship columns displayed in the table |
+| Search | Ensure searchable columns are indexed; avoid `LIKE '%term%'` on unindexed large text columns |
+| Filters | Check that filter query scopes use indexed columns; add DB indexes if needed |
+| RelationManagers | Each RelationManager issues its own query; add `->with()` if it displays nested relationships |
+| BelongsTo selects | Use `->searchable()->preload()` only for small reference tables; for large tables use `->searchable()` without preload to avoid loading all options at once (see §4.5) |
+| Metrics | Metric queries run on every dashboard load; ensure they use indexed columns and consider caching if the table is very large |
 
 ---
 
