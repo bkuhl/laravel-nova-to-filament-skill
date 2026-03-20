@@ -229,17 +229,9 @@ Run Filament at `/filament` while Nova remains at its configured path (usually `
 
 ```bash
 composer require filament/filament:"^5.0"
-```
-
-Before running the installer, confirm with the user whether this project needs a **single admin panel** (the typical Nova replacement) or **multiple distinct panels** (e.g., a separate tenant portal and an admin area). This determines the installer flags:
-
-```bash
-# For a single admin panel — the standard Nova replacement:
 php artisan filament:install --panels
 # Follow the prompts to name the panel (e.g., "admin")
 ```
-
-The `--panels` flag scaffolds a full panel with a dedicated `AdminPanelProvider`, login page, dashboard, and auto-discovery for resources, pages, and widgets. If the user is unsure, use `--panels` — it can always be extended later.
 
 This creates `app/Providers/Filament/AdminPanelProvider.php`.
 
