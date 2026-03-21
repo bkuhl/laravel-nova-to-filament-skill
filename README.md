@@ -45,26 +45,13 @@ This skill gives a Claude agent the detailed knowledge it needs to:
 
 ## Installation
 
-### Claude Code (recommended)
-
-Register this repository as a Claude Code plugin marketplace and install the skill directly:
-
 ```bash
-/plugin marketplace add bkuhl/laravel-nova-to-filament-skill
+claude skill install github:bkuhl/laravel-nova-to-filament-skill
 ```
-
-Then install the skill:
-
-```bash
-/plugin install laravel-nova-to-filament@laravel-nova-to-filament-skill
-```
-
-Once installed, mention the skill in your Claude Code session and the agent will follow the migration workflow automatically.
 
 ---
 
 ## How to use this skill
 
-1. After installing (via any method above), the agent will have access to the skill's migration workflow.
-2. Point the agent at your Laravel project.
-3. The agent will walk through Phases 1–14 in `SKILL.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
+1. After installing, point Claude Code at your Laravel project.
+2. The agent will walk through Phases 1–14 in `SKILL.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
