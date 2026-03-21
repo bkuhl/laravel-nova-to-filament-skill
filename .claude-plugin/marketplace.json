@@ -1,0 +1,22 @@
+{
+  "name": "laravel-nova-to-filament-skill",
+  "owner": {
+    "name": "Brian Kuhl",
+    "homepage": "https://github.com/bkuhl"
+  },
+  "metadata": {
+    "description": "A Claude AI skill that guides an AI coding agent through a complete, production-quality migration from Laravel Nova to Filament PHP v5.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "laravel-nova-to-filament",
+      "description": "Perform a complete, production-quality migration from Laravel Nova to Filament PHP v5. Covers field mapping, resources, actions, filters, lenses, metrics, dashboards, authorization, navigation, and testing with idiomatic Filament v5 patterns.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./"
+      ]
+    }
+  ]
+}
