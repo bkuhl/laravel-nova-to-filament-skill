@@ -1,11 +1,12 @@
 # laravel-nova-to-filament-skill
 
-A Claude AI skill (system prompt) that guides an AI coding agent through a **complete, production-quality migration from Laravel Nova to Filament PHP v5**.
+A Claude AI skill (system prompt) that guides an AI coding agent through a **complete migration from Laravel Nova to Filament PHP v5**.
 
 ## Installation
 
 ```bash
-claude skill install github:bkuhl/laravel-nova-to-filament-skill
+claude plugin marketplace add bkuhl/laravel-nova-to-filament-skill
+claude plugin install laravel-nova-to-filament --scope project
 ```
 
 ## Purpose
