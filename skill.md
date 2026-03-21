@@ -1,0 +1,1183 @@
+# Laravel Nova → Filament PHP v5 Migration Skill
+
+You are an expert Laravel developer specializing in migrating applications from Laravel Nova to Filament PHP v5. Your job is to guide the migration systematically, ensuring no functionality is lost and the resulting Filament application follows Filament best practices and is idiomatic and maintainable.
+
+## State Tracking
+
+Before beginning any work, create a `migration/` directory in the project root containing these markdown files. Update them continuously throughout the migration:
+
+- **`migration/inventory.md`** — Full inventory of Nova artifacts discovered (resources, actions, filters, lenses, metrics, dashboards, custom tools, policies, custom fields).
+- **`migration/plan.md`** — Migration plan: complexity classifications, dependency order, items that cannot be recreated, and decisions made with the user.
+- **`migration/progress.md`** — Per-resource checklist. Each item is checked off only after it has been migrated AND verified.
+- **`migration/auth.md`** — Authorization analysis: every policy, gate, field-level rule, action-level rule, and their Filament equivalents.
+
+Use subagents liberally to keep context windows small. Delegate analysis and code generation to subagents, then review and integrate their output.
+
+---
+
+## Phase 0 — Prerequisites & Baseline
+
+Before touching any code, confirm the environment meets Filament v5 requirements and capture a baseline so you can detect regressions.
+
+### 0.1 Verify environment requirements
+
+Filament v5 requires:
+- **PHP ≥ 8.2** — run `php -v` and confirm.
+- **Laravel ≥ 11.0** — check `composer.json` `require.laravel/framework`.
+- **Node.js & npm** — required if a custom Filament theme is used later; run `node -v` and `npm -v`.
+
+If any requirement is not met, stop and inform the user before proceeding.
+
+### 0.2 Capture a baseline
+
+1. Run the existing test suite (`php artisan test` or `vendor/bin/pest`) and record the number of passing tests. This is your regression baseline.
+2. Note the current Nova URL path from `config/nova.php` (`nova.path`, default `nova`) — this is the path you must **not** use for Filament during parallel operation.
+3. Confirm Nova is currently working by loading that path in the browser.
+
+---
+
+## Phase 1 — Understand the Existing Nova Application
+
+Before writing a single line of Filament code, build a thorough understanding of the Nova codebase.
+
+### 1.1 Inventory every Nova artifact
+
+Scan the project for all Nova-specific files. Common locations:
+
+```
+app/Nova/                  ← Resources, Actions, Filters, Lenses, Metrics
+app/Nova/Metrics/
+app/Nova/Filters/
+app/Nova/Lenses/
+app/Nova/Actions/
+app/Providers/NovaServiceProvider.php
+config/nova.php
+resources/views/vendor/nova/
+```
+
+Produce a structured inventory table:
+
+| Artifact type | File | Notes |
+|---|---|---|
+| Resource | `app/Nova/User.php` | Uses `Nova::userResource()` customization |
+| Action | `app/Nova/Actions/ExportUsers.php` | Queued, generates CSV |
+| Filter | `app/Nova/Filters/UserStatus.php` | Simple select filter |
+| Lens | `app/Nova/Lenses/ActiveSubscribers.php` | Custom Eloquent query + restricted columns |
+| Metric | `app/Nova/Metrics/NewUsers.php` | Value metric, ranges |
+| Dashboard | `app/Nova/Dashboards/Main.php` | Default dashboard |
+| Custom Tool | `app/Nova/Tools/ReportingTool.php` | Inertia-based SPA tool |
+| Custom view | `resources/views/vendor/nova/*.blade.php` | Nova Blade overrides — needs Filament equivalent |
+| Custom theme | `nova.theme` in `config/nova.php` | Custom CSS — needs Filament custom theme |
+
+### 1.2 Classify each Nova field
+
+For every resource, classify each field. The following Nova fields have direct native Filament equivalents requiring no plugin:
+
+| Nova field | Filament form component | Filament table column |
+|---|---|---|
+| `Text` | `TextInput` | `TextColumn` |
+| `Textarea` | `Textarea` | `TextColumn` |
+| `Number` | `TextInput::make()->numeric()` | `TextColumn` |
+| `Boolean` | `Toggle` | `IconColumn::boolean()` |
+| `Select` | `Select` | `SelectColumn` |
+| `MultiSelect` | `Select::make()->multiple()` | `TextColumn` |
+| `Date` | `DatePicker` | `TextColumn::make()->date()` |
+| `DateTime` | `DateTimePicker` | `TextColumn::make()->dateTime()` |
+| `Password` | `TextInput::make()->password()` | *(hidden from table)* |
+| `Hidden` | `Hidden` | *(hidden from table)* |
+| `Color` | `ColorPicker` | `ColorColumn` |
+| `File` | `FileUpload` | `TextColumn` (URL) |
+| `Image` | `FileUpload::make()->image()` | `ImageColumn` |
+| `Avatar` | `FileUpload::make()->avatar()` | `ImageColumn::make()->circular()` |
+| `KeyValue` | `KeyValue` | `TextColumn` (serialized) |
+| `Tags` | `TagsInput` | `TextColumn` |
+| `Markdown` | `MarkdownEditor` | `TextColumn::make()->markdown()` |
+| `Trix` / rich text | `RichEditor` | `TextColumn::make()->html()` |
+| `BelongsTo` | `Select::make()->relationship()` | `TextColumn::make('relation.column')` |
+| `BelongsToMany` | `Select::make()->multiple()->relationship()` | `TextColumn` |
+| `HasMany` / `HasOne` / `HasManyThrough` | `RelationManager` | `RelationManager` |
+| `MorphMany` / `MorphOne` | `RelationManager` | `RelationManager` |
+| `Status` / `Badge` | `Select` | `TextColumn::make()->badge()->color(fn...)` |
+| `ID` | `TextInput::make()->disabled()` | `TextColumn::make('id')->sortable()` |
+| `Heading` | `Section` / `Placeholder` | *(display only)* |
+
+The following Nova fields have **no direct native Filament equivalent**. For each one found in the codebase, research the current most-popular community package that fills the gap (search Packagist and the Filament plugin directory at runtime — see "Finding Plugins at Runtime" at the end of this document) and confirm the approach with the user:
+
+- `Slug` — no native auto-slug equivalent; research plugin options
+- `Currency` — no built-in money/currency field; research plugin options
+- `Code` — no built-in code editor field; research plugin options
+- `JSON` — no built-in JSON editor field; research plugin options
+- `MorphTo` — no native `MorphToSelect` in Filament core; research plugin options
+- `Stack` / `Line` — no direct multi-line column layout; may require `->description()` composition or a plugin
+- `Gravatar` — no built-in gravatar support; requires custom state transformation
+
+### 1.3 Analyze non-standard and custom Nova components
+
+For each non-standard item (custom fields, complex actions, lenses, custom tools), perform thorough code analysis **before asking the user anything**:
+
+1. Read the source file thoroughly.
+2. Identify all data inputs, outputs, side effects, and UI interactions.
+3. Determine what native Filament features could satisfy the same need.
+4. Identify any gaps where a plugin or custom Livewire component would be required.
+5. Draft a proposed migration approach with the options available.
+6. Present your analysis and proposed approach to the user for confirmation or clarification.
+
+**Custom fields** (`Field` subclasses with Vue components): Trace what data the field reads and writes, how it renders, and what interactions it supports. Analyze which native Filament form component and table column most closely matches. Propose a specific approach before asking the user.
+
+**`resolveUsing` / `displayUsing` / `fillUsing` transformations**: These are often workarounds for missing native customization elsewhere. Before mapping them to Filament transformation callbacks, evaluate whether native Filament features eliminate the need entirely. Prefer native solutions:
+- Model attribute casts (`Attribute::make()`) handle computed or transformed read values; model mutators or observers handle transformation on save — prefer these over transformation callbacks
+- `->money()`, `->date()`, `->boolean()`, `->badge()`, `->color()`, `->icon()`, `->prefix()`, `->suffix()`, `->description()` cover most display customizations natively
+- Only use transformation callbacks (`->formatStateUsing()`, `->getStateUsing()`, `->dehydrateStateUsing()`) when no native Filament option or model-level solution exists
+
+**`dependsOn` / conditional visibility**: These can be complex — do extra analysis on the full data flow before proposing a solution:
+1. Identify every field that triggers a change and every field that reacts to it.
+2. Identify what changes (visibility, available options, required state, default value).
+3. Map to Filament's `->live()` + `fn (Get $get)` pattern for field-driven reactivity, or `->hidden(fn...)` / `->visible(fn...)` for static conditions.
+4. For multi-field dependency chains, consider browser MCP testing: fill the triggering field and assert the dependent field's visibility or options via DOM inspection.
+
+**All Filament closures must be strongly typed** — use typed parameters and return types so that errors surface immediately with clear messages rather than failing silently:
+
+```php
+// Correct — strongly typed:
+->hidden(fn (string $state): bool => $state === 'draft')
+->color(fn (string $state): string => match ($state) { 'active' => 'success', default => 'gray' })
+->options(fn (Get $get): array => Category::where('type', $get('type'))->pluck('name', 'id')->toArray())
+
+// Avoid — untyped:
+->hidden(fn ($state) => $state === 'draft')
+```
+
+**Lenses**: Trace the full Eloquent query and all custom columns, filters, and actions. These are among the most complex artifacts to migrate. Understand the business question the lens answers before planning the Filament equivalent.
+
+**Nova cards on resource show pages**: Nova allows metric widgets at the top of a resource detail page. Filament does not support this natively on the view/edit page. Document these in `migration/plan.md` under "Features that cannot be recreated" and confirm the approach with the user.
+
+### 1.4 Review authorization and policies — deep analysis
+
+Authorization is the highest-risk area of a migration. Errors here expose data to unauthorized users or lock out legitimate ones. Perform exhaustive analysis and document everything in `migration/auth.md`.
+
+**Scan and document every authorization point:**
+
+```
+app/Policies/                          ← Standard Laravel policies
+app/Nova/<Resource>.php                ← authorizeToCreate, authorizeToUpdate, canSee per field/action
+app/Providers/NovaServiceProvider.php  ← Nova::auth() gate, Nova::gate()
+```
+
+For every resource, document in `migration/auth.md`:
+- Policy class used (or "none — uses default")
+- Which of `viewAny`, `view`, `create`, `update`, `delete`, `restore`, `forceDelete` are overridden and the exact logic they contain
+- Every field with `->canSee(fn ...)` — what condition is checked, which user attributes or roles are involved
+- Every action with `->canRun(fn ...)` — what condition is checked
+- Every filter with `->canSee(fn ...)` — what condition is checked
+- Any ownership-based rules (e.g., user can only edit their own records)
+- Any subscription, plan, or feature-flag-based rules
+
+**Build an authorization test matrix**: For each resource with non-trivial authorization, list every user role that exists in the application and what each role can do (create, read, update, delete, run each action, see each field). This matrix drives the browser MCP verification in Phase 13.
+
+**Panel-level access** (`Nova::auth()`): This maps to `canAccessPanel(Panel $panel): bool` on the `User` model. Document the exact logic so it can be replicated faithfully.
+
+---
+
+## Phase 2 — Plan the Migration
+
+### 2.1 Identify functionality that cannot be recreated
+
+Before writing any code, explicitly identify features of the Nova application that have no equivalent in Filament and document them in `migration/plan.md`. For each one, present the issue and available options to the user, and document their decision before proceeding.
+
+Known Filament limitations compared to Nova (verify whether these are still current at migration time):
+- **Resource show page widgets**: Nova supports adding metric cards to the top of a resource detail view. Filament does not have a native equivalent on the view/edit page. Options: add a stats section to the infolist, create a custom view page, or drop the feature.
+- **Lens-style first-class URL views**: Nova lenses are first-class URL-addressable views with their own navigation entry. In Filament these become custom pages, which may have a different navigation experience.
+- **Nova cards on any page**: Nova cards can appear on dashboard, resource index, and detail pages. In Filament, widgets on resource pages are limited; dashboard widgets are fully supported.
+
+For any feature the user wants to preserve that cannot be natively recreated, document the agreed alternative in `migration/plan.md` before touching any code.
+
+### 2.2 Categorize each artifact
+
+Create a migration plan table in `migration/plan.md`:
+
+| Artifact | Complexity | Strategy | Verified |
+|---|---|---|---|
+| `User` resource | Low | Direct mapping | ☐ |
+| `Order` resource | Medium | Custom status badge color logic | ☐ |
+| `ExportUsers` action | Medium | Queued action with notification | ☐ |
+| `ActiveSubscribers` lens | High | Custom page with `InteractsWithTable` | ☐ |
+| `NewUsers` metric | Low | `StatsOverviewWidget` | ☐ |
+| `RevenueByMonth` metric | Medium | `ChartWidget` (line) | ☐ |
+| `ReportingTool` | High | Confirm approach with user first | ☐ |
+
+Complexity ratings:
+- **Low**: Direct mapping, no custom logic.
+- **Medium**: Requires adapting callbacks, closures, or queries.
+- **High**: Requires a custom Livewire component, architectural change, or user decision.
+
+### 2.3 Determine migration order — test as you go
+
+Migrate and **fully verify each item before moving to the next**. Do not batch migrations without verification — issues discovered late are expensive to unwind. After each item passes its acceptance checklist (Phase 13), mark it verified in `migration/progress.md` before continuing.
+
+Recommended order:
+1. Install & configure Filament panel (alongside Nova at a different path).
+2. Shared foundation: `User` resource and authorization (everything depends on these).
+3. Lookup / reference resources with no dependencies (`Category`, `Tag`, `Country`, etc.).
+4. Core business resources in dependency order (parent models before child models).
+5. Resources with complex relationships (BelongsToMany, polymorphic).
+6. Filters and Actions (after the resources they belong to).
+7. Lenses → Custom Pages.
+8. Metrics → Widgets and Dashboards.
+9. Custom Tools (after confirming the approach with the user — see Phase 9).
+10. Navigation and polish.
+11. Full authorization verification pass.
+
+### 2.4 Plan parallel operation and browser-based comparison
+
+Run Filament at `/filament` while Nova remains at its configured path (usually `/nova`). Both panels share the same database.
+
+```php
+// AdminPanelProvider.php
+->path('filament')
+```
+
+**Browser MCP side-by-side testing strategy**: Use a browser automation MCP (e.g., Playwright MCP) to drive comparison between the two panels without requiring manual user interaction for every check. The agent should:
+
+1. Open `/nova` in one tab and `/filament` in another.
+2. Log in to both panels using the same test credentials.
+3. For each resource: navigate to the list in both panels, compare visible columns and record counts, open the same record by ID in both panels and compare all field values, verify UI controls (edit/delete/action buttons) appear or are hidden correctly per user role.
+4. **Read-only operations only during comparison** — because both panels share the same database, any mutation in one panel immediately affects the other. Do not create, edit, or delete records during side-by-side comparison unless the test explicitly requires it and consequences are documented.
+5. If a record must be created to test a form, use a clearly marked test fixture and clean it up afterward.
+
+---
+
+## Phase 3 — Install & Configure Filament
+
+### 3.1 Install Filament v5
+
+```bash
+composer require filament/filament:"^5.0"
+php artisan filament:install --panels
+# Follow the prompts to name the panel (e.g., "admin")
+```
+
+This creates `app/Providers/Filament/AdminPanelProvider.php`.
+
+### 3.2 Configure the panel
+
+In `AdminPanelProvider.php`:
+
+```php
+->id('admin')
+->path('filament')         // Keep Nova at /nova during migration
+->login()
+->colors(['primary' => Color::Indigo])
+->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
+->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
+->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\\Filament\\Widgets')
+->middleware([...])
+->authMiddleware([Authenticate::class]);
+```
+
+### 3.3 Panel access control
+
+Migrate Nova's `Nova::auth()` gate to Filament's `canAccessPanel` method on the `User` model. This is the Filament-preferred approach — it keeps authorization logic on the model where it belongs, rather than in a service provider.
+
+```php
+// Nova (NovaServiceProvider.php) — what you are replacing:
+Nova::auth(function ($request) {
+    return $request->user()?->isAdmin();
+});
+
+// Filament — add to App\Models\User:
+use Filament\Models\Contracts\FilamentUser;
+use Filament\Panel;
+
+class User extends Authenticatable implements FilamentUser
+{
+    public function canAccessPanel(Panel $panel): bool
+    {
+        // Replicate the exact same logic from Nova::auth()
+        return $this->isAdmin();
+    }
+}
+```
+
+If the Nova app has complex access logic (e.g., checking roles, email domains, or subscription status), replicate that exact logic inside `canAccessPanel`. Document the mapping in `migration/auth.md`.
+
+> **Important**: The `User` model **must** implement `FilamentUser`; without the interface, Filament blocks all users in production. Verify this is implemented before testing panel access.
+
+### 3.4 Migrate `config/nova.php` settings to the panel provider
+
+Review `config/nova.php` and port each relevant setting to `AdminPanelProvider.php`:
+
+| `config/nova.php` key | Filament equivalent |
+|---|---|
+| `nova.path` | `->path('...')` |
+| `nova.guard` | `->authGuard('...')` |
+| `nova.middleware` | `->middleware([...])` |
+| `nova.auth_middleware` | `->authMiddleware([...])` |
+| `nova.storage.disk` | Configure per `FileUpload` field using `->disk('...')`, or set the default disk in `config/filesystems.php` |
+| `nova.pagination` (default per-page) | `->defaultPaginationPageOption(15)` on the panel provider, or `->paginated([15, 25, 50])` per table |
+| `nova.currency` | Handled per-field with `->money('USD')` |
+
+---
+
+## Phase 4 — Migrate Resources
+
+For each Nova resource, follow this pattern.
+
+### 4.1 Resource scaffold
+
+```bash
+php artisan make:filament-resource ModelName --generate
+```
+
+`--generate` introspects the model's columns and creates a sensible starting point.
+
+### 4.2 Map resource-level settings
+
+| Nova | Filament |
+|---|---|
+| `public static $model` | `protected static string $model` |
+| `public static $title` | `protected static ?string $recordTitleAttribute` |
+| `public static $search` | `protected static ?array $globallySearchableAttributes` + table `->searchable()` on columns |
+| `public static $globallySearchable` | `protected static bool $shouldRegisterNavigation` + `getGlobalSearchResultTitle` |
+| `public static $perPageOptions` | `protected static ?int $defaultPaginationPageOption` / `->paginated([10, 25, 50])` |
+| `public static $group` | `protected static ?string $navigationGroup` |
+| `public static $icon` | `protected static ?string $navigationIcon` |
+| `public static $priority` | `protected static ?int $navigationSort` |
+| `public static $label` | `protected static ?string $modelLabel` |
+| `public static $pluralLabel` | `protected static ?string $pluralModelLabel` |
+| `public static $tableStyle` | Table component configuration |
+| `public static $clickAction` | `->recordAction()` or `->recordUrl()` on the table |
+| `public static $polling` | `->poll()` on the table |
+| `public function indexQuery` | `public static function getEloquentQuery(): Builder` on the resource |
+| `public function detailQuery` | `public static function getEloquentQuery(): Builder` (same method; Filament applies it globally) |
+| `public function relatableQuery` | Override `getRelatedRecordsQuery()` on the `Select` field or `RelationManager` |
+
+**Custom index/detail query example:**
+```php
+// Nova
+public static function indexQuery(NovaRequest $request, $query): Builder
+{
+    return $query->where('team_id', $request->user()->team_id);
+}
+
+// Filament — on the resource class:
+public static function getEloquentQuery(): Builder
+{
+    return parent::getEloquentQuery()->where('team_id', auth()->user()->team_id);
+}
+```
+
+### 4.3 Map form fields (Nova `fields()` → Filament `form()`)
+
+Nova organises fields into panels using `Panel`. Filament uses `Section`, `Grid`, `Fieldset`, `Tabs`, `Wizard`, and `Split`.
+
+**Nova panels → Filament sections:**
+```php
+// Nova
+Panel::make('Contact Information')->fields([
+    Text::make('Phone'),
+    Text::make('Address'),
+]),
+
+// Filament
+Section::make('Contact Information')->schema([
+    TextInput::make('phone'),
+    TextInput::make('address'),
+]),
+```
+
+**Nova tabs → Filament tabs:**
+```php
+// Nova
+Tabs::make('Details', [
+    Tab::make('Info')->fields([...]),
+    Tab::make('Media')->fields([...]),
+]),
+
+// Filament
+Tabs::make('Details')->tabs([
+    Tab::make('Info')->schema([...]),
+    Tab::make('Media')->schema([...]),
+]),
+```
+
+**Conditional field visibility** — use strongly typed closures:
+```php
+// Static page-context rules:
+TextInput::make('name')->hiddenOn('edit'),
+
+// Typed dynamic callback:
+TextInput::make('name')->hidden(fn (string $operation): bool => $operation === 'edit'),
+
+// Reactive dependency — triggering field must be ->live():
+Select::make('country')->live(),
+Select::make('state')
+    ->options(fn (Get $get): array => State::where('country', $get('country'))->pluck('name', 'id')->toArray()),
+```
+
+**Field value transformation** — always prefer native Filament features and model-level solutions over transformation callbacks. Check these before using `->formatStateUsing()` or `->dehydrateStateUsing()`:
+- `->money()`, `->date()`, `->boolean()`, `->badge()`, `->color()`, `->icon()`, `->prefix()`, `->suffix()`, `->description()` handle most display cases natively
+- Model `Attribute::make()` casts handle computed/transformed read values; model mutators or observers handle transformation on save
+
+Only use transformation callbacks when no native option exists, and always type them:
+```php
+// Prefer a model Attribute cast over getStateUsing:
+// User model:
+// use Illuminate\Database\Eloquent\Casts\Attribute;
+// protected function fullName(): Attribute {
+//     return Attribute::make(get: fn (): string => $this->first_name.' '.$this->last_name);
+// }
+TextColumn::make('full_name'),  // reads the attribute automatically
+
+// Only when no native option covers it:
+TextColumn::make('name')->formatStateUsing(fn (string $state): string => strtoupper($state)),
+TextInput::make('name')->dehydrateStateUsing(fn (string $state): string => trim($state)),
+```
+
+### 4.4 Map table columns
+
+Nova uses the same `fields()` for forms and tables. Filament separates them into `form()` and `table()`. The `--generate` flag on `make:filament-resource` creates a starting table from the model's database columns — column names are inferred automatically, you only need to add display modifiers.
+
+For relationship columns, use dot notation — Filament resolves these from the model automatically:
+```php
+TextColumn::make('user.name'),       // reads $record->user->name
+TextColumn::make('category.name')->sortable(),
+```
+
+Adjust the generated table to match the Nova resource's index columns and sort/search settings.
+
+### 4.5 Map relationships
+
+| Nova | Filament |
+|---|---|
+| `BelongsTo::make('User')` form | `Select::make('user_id')->relationship('user', 'name')->searchable()->preload()` |
+| `BelongsTo::make('User')` table | `TextColumn::make('user.name')` |
+| `BelongsToMany::make('Tags')` | `Select::make('tags')->multiple()->relationship('tags', 'name')->searchable()->preload()` |
+| `HasMany`, `HasOne`, `HasManyThrough`, `MorphMany`, `MorphOne` | `RelationManager` |
+| `MorphTo` | No native equivalent — research current community options at runtime |
+
+Nova's `BelongsTo` field has inline search built-in. In Filament, add `->searchable()` to enable AJAX search on the Select (required for large datasets) and `->preload()` for small option sets where loading all options upfront is acceptable.
+
+**Creating a RelationManager:**
+```bash
+# Arguments: ResourceClass  relationshipMethod  titleColumn
+php artisan make:filament-relation-manager UserResource posts title
+```
+
+The `title` argument is **required** — it tells Filament which column to display as each related record's label in the relation table. Use the most human-readable column name (e.g., `title`, `name`, `email`).
+
+Register on the resource:
+```php
+public static function getRelations(): array
+{
+    return [PostsRelationManager::class];
+}
+```
+
+### 4.6 Map Nova's `cards()` (detail view cards) → Filament infolists
+
+Nova's `cards()` on the detail page → Filament's `infolist()` using `Infolist` schema components:
+
+```php
+// Nova
+public function cards(NovaRequest $request)
+{
+    return [
+        new OrderSummaryCard,
+    ];
+}
+
+// Filament: override infolist() on the resource
+public static function infolist(Infolist $infolist): Infolist
+{
+    return $infolist->schema([
+        Section::make('Order Summary')->schema([
+            TextEntry::make('total')->money('usd'),
+            TextEntry::make('status')->badge(),
+        ]),
+    ]);
+}
+```
+
+---
+
+## Phase 5 — Migrate Actions
+
+### 5.1 Nova action → Filament action mapping
+
+| Nova | Filament |
+|---|---|
+| `Action` (basic) | `Action` in table `->actions()` |
+| `DestructiveAction` | `Action::make()->color('danger')->requiresConfirmation()` |
+| `ExportAsCsvAction` (Nova) | `ExportAction` from `filament/spatie-laravel-export` or custom |
+| `ImportAction` | `ImportAction` from `filament/spatie-laravel-import` |
+| Queued action | `Action::make()->job(MyJob::class)` or dispatch job in `handle()` |
+| Action with form fields | `Action::make()->form([...])` |
+| Action file download | Return `Storage::download(...)` from `handle()` |
+| Standalone action (toolbar) | `->headerActions([...])` |
+| Bulk action | `->bulkActions([BulkAction::make(...)])` |
+
+**Nova action response types → Filament equivalents:**
+
+| Nova response | Filament equivalent |
+|---|---|
+| `Action::message('Done')` | `Notification::make()->title('Done')->success()->send()` |
+| `Action::redirect('/path')` | `$this->redirect('/path')` inside `->action()` |
+| `Action::openInNewTab('https://...')` | `Action::make()->url('https://...')->openUrlInNewTab()` for static URLs; `->action(fn () => $this->js("window.open(url, '_blank')"))` for dynamic URLs |
+| `Action::download($file, $name)` | Return `response()->download(...)` from a controller action invoked inside `->action()` |
+
+**Example — queued export action:**
+```php
+// Nova
+class ExportUsers extends Action
+{
+    public function handle(ActionFields $fields, Collection $models): void
+    {
+        // dispatch job
+        ExportUsersJob::dispatch($models->pluck('id'));
+    }
+    public function fields(): array { return []; }
+}
+
+// Filament
+Action::make('exportUsers')
+    ->label('Export Users')
+    ->icon('heroicon-o-arrow-down-tray')
+    ->action(function (Collection $records) {
+        ExportUsersJob::dispatch($records->pluck('id'));
+        Notification::make()->title('Export queued')->success()->send();
+    })
+```
+
+### 5.2 Action confirmation modals
+
+```php
+// Nova: DestructiveAction with confirmation
+// Filament:
+Action::make('delete')
+    ->requiresConfirmation()
+    ->modalHeading('Delete record?')
+    ->modalDescription('This cannot be undone.')
+    ->color('danger')
+    ->action(fn ($record) => $record->delete())
+```
+
+### 5.3 Action form fields
+
+```php
+// Nova:
+public function fields(): array
+{
+    return [
+        Select::make('reason')->options([...]),
+        Textarea::make('notes'),
+    ];
+}
+
+// Filament:
+Action::make('reject')
+    ->form([
+        Select::make('reason')->options([...]),
+        Textarea::make('notes'),
+    ])
+    ->action(function (array $data, $record) {
+        $record->reject($data['reason'], $data['notes']);
+    })
+```
+
+---
+
+## Phase 6 — Migrate Filters
+
+### 6.1 Nova filter → Filament filter mapping
+
+| Nova filter type | Filament equivalent |
+|---|---|
+| `Filter` (select) | `SelectFilter` |
+| `Filter` (boolean) | `TernaryFilter` or `SelectFilter` |
+| `Filter` (date range) | `Filter` with `DatePicker` form components |
+| `BooleanFilter` | `TernaryFilter` |
+| Custom `Filter` with Eloquent scope | `Filter::make()->query(fn ($query) => ...)` |
+
+**Example:**
+```php
+// Nova
+class UserStatusFilter extends Filter
+{
+    public function apply(Builder $query, mixed $value): Builder
+    {
+        return $query->where('status', $value);
+    }
+    public function options(): array
+    {
+        return ['active' => 'Active', 'inactive' => 'Inactive'];
+    }
+}
+
+// Filament
+SelectFilter::make('status')
+    ->options(['active' => 'Active', 'inactive' => 'Inactive'])
+```
+
+**Date range filter:**
+```php
+Filter::make('created_between')
+    ->form([
+        DatePicker::make('from'),
+        DatePicker::make('until'),
+    ])
+    ->query(function (Builder $query, array $data) {
+        return $query
+            ->when($data['from'], fn ($q) => $q->whereDate('created_at', '>=', $data['from']))
+            ->when($data['until'], fn ($q) => $q->whereDate('created_at', '<=', $data['until']));
+    })
+    ->indicateUsing(function (array $data): array {
+        $indicators = [];
+        if ($data['from'] ?? null) {
+            $indicators[] = Indicator::make('From: '.$data['from'])->removeField('from');
+        }
+        if ($data['until'] ?? null) {
+            $indicators[] = Indicator::make('Until: '.$data['until'])->removeField('until');
+        }
+        return $indicators;
+    })
+```
+
+For any custom filter with multiple form fields, add `->indicateUsing()` so active filters are displayed as removable pills in the table header — this matches the UX users expect from Nova.
+
+---
+
+## Phase 7 — Migrate Lenses
+
+Nova lenses are custom table views with their own query, columns, and actions. In Filament they map to **custom pages** containing a `Table` widget or a full Livewire table component.
+
+### 7.1 Strategy
+
+1. Create a custom Filament page: `php artisan make:filament-page ActiveSubscribersPage`
+2. Embed a `Table` using the `InteractsWithTable` trait.
+3. Translate the lens's `query()`, `columns()`, `filters()`, and `actions()` into the Filament table equivalents.
+
+```php
+// Nova lens
+class ActiveSubscribers extends Lens
+{
+    public static function query(Builder $query): Builder
+    {
+        return $query->whereHas('subscription', fn ($q) => $q->active());
+    }
+    public function fields(): array { ... }
+    public function filters(): array { ... }
+}
+
+// Filament v5 custom page — use the table(Table $table): Table pattern
+use Filament\Tables\Table;
+use Filament\Tables\Concerns\InteractsWithTable;
+use Filament\Tables\Contracts\HasTable;
+
+class ActiveSubscribersPage extends Page implements HasTable
+{
+    use InteractsWithTable;
+
+    protected static string $view = 'filament.pages.active-subscribers';
+
+    public function table(Table $table): Table
+    {
+        return $table
+            ->query(User::query()->whereHas('subscription', fn ($q) => $q->active()))
+            ->columns([
+                // TextColumn::make('name'), ...
+            ])
+            ->filters([
+                // SelectFilter::make('plan'), ...
+            ])
+            ->actions([
+                // Action::make(...), ...
+            ]);
+    }
+}
+```
+
+Register the page on the panel and add a navigation item.
+
+---
+
+## Phase 8 — Migrate Metrics & Dashboards
+
+### 8.1 Nova metric → Filament widget mapping
+
+| Nova metric | Filament widget |
+|---|---|
+| `Value` metric | `StatsOverviewWidget` (single stat card) |
+| `Trend` metric | `ChartWidget` (line chart) |
+| `Partition` metric | `ChartWidget` (doughnut / bar chart) |
+| `Table` metric | `TableWidget` |
+
+### 8.2 Value metric → StatsOverviewWidget
+
+```php
+// Nova
+class NewUsers extends Value
+{
+    public function calculate(NovaRequest $request): Result
+    {
+        return $this->count($request, User::class);
+    }
+    public function ranges(): array { return [30 => '30 Days', 60 => '60 Days', 'TODAY' => 'Today']; }
+}
+
+// Filament
+class NewUsersWidget extends StatsOverviewWidget
+{
+    protected function getStats(): array
+    {
+        return [
+            Stat::make('New Users (30d)', User::where('created_at', '>=', now()->subDays(30))->count())
+                ->description('Last 30 days')
+                ->color('success'),
+        ];
+    }
+}
+```
+
+**Nova value metric ranges**: Nova's `ranges()` method adds a time-range selector to the metric card. `StatsOverviewWidget` has no built-in range selector. Options:
+- **Hardcode the most common range** (simplest — bake a single range into `getStats()`).
+- **Use a `ChartWidget` instead** — `ChartWidget` supports a built-in `$filter` property that can act as a range selector.
+- **Add a Livewire property** to the `StatsOverviewWidget` and bind it to a Select in a custom view (advanced).
+
+Present these options to the user for each metric that uses ranges and document the decision in `migration/plan.md`.
+
+### 8.3 Trend metric → ChartWidget
+
+```php
+// Filament
+class UserGrowthChart extends ChartWidget
+{
+    protected static ?string $heading = 'User Growth';
+
+    protected function getData(): array
+    {
+        $data = User::selectRaw('DATE(created_at) as date, COUNT(*) as count')
+            ->where('created_at', '>=', now()->subDays(30))
+            ->groupBy('date')
+            ->pluck('count', 'date');
+
+        return [
+            'datasets' => [['label' => 'New Users', 'data' => $data->values()]],
+            'labels' => $data->keys(),
+        ];
+    }
+
+    protected function getType(): string { return 'line'; }
+}
+```
+
+### 8.4 Partition metric → ChartWidget (doughnut)
+
+```php
+protected function getType(): string { return 'doughnut'; }
+```
+
+### 8.5 Dashboards → Filament Dashboard page
+
+Nova dashboards map to Filament's default Dashboard page with widgets. Register widgets on the panel:
+
+```php
+// AdminPanelProvider.php
+->widgets([
+    NewUsersWidget::class,
+    UserGrowthChart::class,
+    RevenuePartitionChart::class,
+])
+```
+
+Or override the dashboard page to control widget layout:
+```bash
+php artisan make:filament-page Dashboard --type=dashboard
+```
+
+---
+
+## Phase 9 — Migrate Custom Tools
+
+Nova custom tools (full Vue/Inertia SPAs registered via `Nova::tools()`) require individual decisions before any code is written.
+
+### 9.1 Analyze and confirm approach with the user
+
+For each custom tool:
+
+1. Read the tool's source thoroughly — routes, controllers, Vue components, data sources, side effects.
+2. Summarize its purpose, the data it reads/writes, and every user interaction it supports.
+3. Present the following options to the user and confirm their choice before proceeding:
+   - **a) Rebuild natively in Filament** — as a custom page, widgets, Livewire components, or a wizard.
+   - **b) Replace with a plugin** — search Packagist at runtime for current popular options.
+   - **c) Drop entirely** — if the functionality is no longer needed.
+   - **d) Keep as-is** — linked from the Filament navigation (e.g., served at its own URL or as an iframe).
+4. Document the decision in `migration/plan.md`.
+
+### 9.2 Native Filament rebuild (option a)
+
+Prefer native Filament solutions — seek these before considering custom Livewire:
+- Data visualizations → `ChartWidget` and `StatsOverviewWidget`
+- Form-driven workflows → wizard or multi-step custom page
+- Data tables with custom queries → custom page with `InteractsWithTable`
+- CRUD-like interfaces → a standard Filament resource
+
+```bash
+php artisan make:filament-page ToolName
+```
+
+---
+
+## Phase 10 — Migrate Authorization & Policies
+
+### 10.1 Policy method mapping
+
+Filament uses the same Laravel policies as Nova. The method names are the same:
+
+| Policy method | Controls |
+|---|---|
+| `viewAny` | Can access the resource list page |
+| `view` | Can view a record's detail page |
+| `create` | Can access the create page / see create button |
+| `update` | Can access the edit page / see edit button |
+| `delete` | Can delete a record |
+| `restore` | Can restore a soft-deleted record |
+| `forceDelete` | Can permanently delete a record |
+
+Filament automatically discovers and uses policies registered in `AuthServiceProvider`. No additional configuration is needed for standard CRUD policies.
+
+**Verify policy registration before testing**: Nova sometimes auto-registers policies in its service provider. Ensure every policy is properly registered via Laravel's standard `AuthServiceProvider::$policies` array or model-based auto-discovery. An unregistered policy may result in unexpected access behavior — either silently denying or allowing actions depending on your `Gate` configuration. Verify registration with:
+```bash
+php artisan auth:show   # Laravel 12+
+# or inspect AuthServiceProvider::$policies manually
+```
+Write a quick policy unit test for each resource to confirm each policy method returns the expected result for each role.
+
+Work from `migration/auth.md` built in Phase 1.4. Verify every rule is replicated before considering the migration done.
+
+### 10.2 Field-level authorization — strongly typed closures required
+
+```php
+// Nova: ->canSee(fn ($request) => $request->user()->isAdmin())
+
+// Filament:
+TextInput::make('secret_field')
+    ->visible(fn (): bool => auth()->user()->isAdmin()),
+```
+
+### 10.3 Action authorization — strongly typed closures required
+
+```php
+// Nova: ->canRun(fn ($request, $model) => ...)
+
+// Filament:
+Action::make('approve')
+    ->visible(fn (Model $record): bool => auth()->user()->can('approve', $record)),
+```
+
+### 10.4 Resource-level overrides
+
+```php
+public static function canCreate(): bool
+{
+    return auth()->user()->hasRole('admin');
+}
+
+public static function canEdit(Model $record): bool
+{
+    return auth()->user()->can('update', $record);
+}
+
+public static function canDelete(Model $record): bool
+{
+    return auth()->user()->can('delete', $record);
+}
+```
+
+### 10.5 Roles & permissions packages
+
+If the Nova app uses a roles/permissions package (e.g., `spatie/laravel-permission`), search Packagist at runtime for the current most-popular and actively maintained Filament v5 integration for that package. Verify compatibility before installing.
+
+### 10.6 Authorization verification pass
+
+After all resources are migrated, perform a dedicated authorization verification pass using browser MCP with each user role from the test matrix in `migration/auth.md`:
+- Verify destructive actions are hidden from unauthorized roles
+- Verify restricted fields are invisible to unauthorized roles
+- Verify unauthorized resource URLs return 403, not empty pages
+- Verify record-level ownership rules are enforced (user cannot access another user's records)
+
+---
+
+## Phase 11 — Navigation
+
+### 11.1 Nova navigation → Filament navigation
+
+| Nova | Filament |
+|---|---|
+| `$group` on resource | `protected static ?string $navigationGroup` |
+| `$priority` on resource | `protected static ?int $navigationSort` |
+| `$icon` on resource | `protected static ?string $navigationIcon` |
+| `Nova::mainMenu()` (custom nav) | `->navigationItems([...])` on panel provider |
+| `Nova::userMenu()` | `->userMenuItems([...])` on panel provider |
+| Custom `MenuSection` | `NavigationGroup::make(...)` |
+| `$withRelationshipLinks` / `badge()` on resource | `protected static function getNavigationBadge(): ?string` |
+
+**Navigation badges** — If Nova resources use `badge()` to show record counts or statuses in the sidebar, migrate to `getNavigationBadge()`:
+```php
+// Filament resource
+protected static function getNavigationBadge(): ?string
+{
+    return static::getModel()::where('status', 'pending')->count() ?: null;
+}
+
+protected static function getNavigationBadgeColor(): ?string
+{
+    return 'warning';
+}
+```
+
+---
+
+## Phase 12 — Notifications & Broadcasting
+
+### 12.1 Nova notifications → Filament notifications
+
+| Nova | Filament |
+|---|---|
+| `Nova::notify()` (flash) | `Notification::make()->title(...)->success()->send()` |
+| `NovaNotification` (persistent) | `DatabaseNotification` via `filament/notifications` |
+| `Nova::createNotification()` (DB) | `Notification::make()->sendToDatabase(auth()->user())` |
+
+---
+
+## Phase 13 — Testing & Verification
+
+Run this verification workflow **after each resource is migrated** — do not wait until the full migration is done.
+
+### 13.1 Browser MCP setup
+
+Before attempting any browser comparison, check whether Playwright MCP (or an equivalent browser automation tool) is available in the current environment.
+
+**Check availability:**
+```bash
+# If Playwright MCP is configured, the agent will be able to drive browser tabs automatically.
+# Look for a playwright config or MCP server config in the project root.
+ls playwright.config.* mcp*.json .mcp.json 2>/dev/null
+```
+
+- **If Playwright MCP is available**: The agent can navigate both `/nova` and `/filament` simultaneously and perform automated comparisons as described in §13.2.
+- **If Playwright MCP is NOT available**: Inform the user:
+  > "Playwright MCP is not detected in this environment. I can guide you through a manual side-by-side comparison using two Chrome tabs, or you can set up Playwright MCP by following [the Playwright MCP setup guide](https://github.com/microsoft/playwright-mcp). Which would you prefer?"
+
+  Proceed with the manual checklist in §13.4 (human-verifiable section) until browser automation is available.
+
+**Finding login credentials:**
+Do not create new test accounts. Instead, inspect the project's existing database seeders to find credentials that can be used for the comparison:
+```bash
+grep -r "password\|admin\|seeder" database/seeders/ --include="*.php" -l
+```
+Use the seeded admin user (or whichever role gives full access) for the initial comparison. Adjust the role used for each authorization-sensitive check based on the roles found in the seeders.
+
+**Planning question — ask the user before starting comparison:**
+> "For the side-by-side browser comparison, what scope makes sense given your current test data and database seeds?
+> - **Read-only only** (list/detail pages, filters, search) — safe with any dataset
+> - **Include write operations** (create, edit, delete) — requires a stable seed or transaction rollback strategy
+>
+> What would you prefer for this project?"
+
+Record the user's answer and scope the automated comparison accordingly.
+
+### 13.2 Browser MCP side-by-side comparison
+
+Use browser automation (Playwright MCP or equivalent) to control the browser and drive the comparison. The agent navigates both panels simultaneously without requiring manual user interaction for every step.
+
+**Setup:**
+1. Ensure both `/nova` and `/filament` are reachable in the local environment.
+2. Use credentials found in the project's database seeders (see §13.1).
+3. Use a consistent, known-state dataset. If the project has a dedicated seed command (e.g. `php artisan db:seed --class=TestingSeeder`), run it first. Otherwise use database transactions to keep state stable.
+
+**Automated comparison per resource (read-only scope — always run):**
+1. Log in to `/nova` in one tab and `/filament` in another using the same seeded credentials.
+2. Navigate to the resource list in both panels:
+   - Assert record counts match.
+   - Assert column headers and visible data match (or document intentional differences).
+   - Apply the same sort in both and assert the order matches.
+   - Search for the same term in both and assert result sets match.
+3. Open the same record (by ID) in both panels:
+   - Assert every field value is identical.
+   - Assert restricted fields are visible/hidden correctly per role.
+4. Check filter behavior: apply each filter in both panels and assert the result sets match.
+
+**Additional write-operation comparisons (only if user confirmed this scope in §13.1):**
+1. Create a record via Filament and verify it appears in the list and persists in the database.
+2. Edit an existing record via Filament and verify the change is reflected.
+3. If destructive operations are included, wrap each in a database transaction or use a dedicated test seed and clean up afterward. Do not run destructive operations on shared production-equivalent data.
+
+### 13.3 Automated tests — migrate Nova tests
+
+**Do not create new test files.** Instead, find any existing tests that cover Nova resources and migrate them to test the equivalent Filament components.
+
+**Find Nova-related tests:**
+```bash
+grep -r "Nova\|nova" tests/ --include="*.php" -l
+```
+
+**Detect the project's test framework before writing any test code:**
+```bash
+# Pest
+grep pestphp composer.json
+# PHPUnit
+cat phpunit.xml 2>/dev/null || cat phpunit.xml.dist 2>/dev/null
+```
+
+Use whichever framework is already in use. Write migrated tests in the same style as the existing test files (same framework, same assertion style, same directory conventions).
+
+**Migration approach per test file found:**
+1. Identify the Nova resource or action the test covers.
+2. Replace Nova-specific assertions (e.g. `Nova::assertResourceExists`) with Filament equivalents (e.g. `livewire(ListUsers::class)->assertCanSeeTableRecords(...)`).
+3. Update namespaces and class references from `App\Nova\*` to `App\Filament\Resources\*`.
+4. Keep the test intent identical — do not expand or change what is being tested during migration.
+
+**Authorization — rely on policies, not acceptance tests:**
+Rather than adding new HTTP-layer authorization tests, re-review each Laravel policy class that was in use with Nova and verify it is correctly registered and applied in Filament (see §10.1). Policies are simple enough to translate directly. If a policy was covering a Nova resource, confirm that the equivalent Filament resource calls `->authorizeResourceAccess()` or uses the same policy via `->policy(UserPolicy::class)`. No additional explicit authorization acceptance tests are needed beyond what already exists in the project.
+
+### 13.4 Acceptance checklist per resource
+
+Record this checklist in `migration/progress.md` for each resource. Check off each item before declaring the resource done.
+
+#### Agent-verifiable (automated)
+
+- [ ] `php artisan filament:check` (or equivalent) reports no errors for this resource
+- [ ] List page HTTP response is 200 for an authenticated admin user
+- [ ] Record count on the list page matches the Nova list page (browser MCP comparison)
+- [ ] Column headers match or intentional differences are documented
+- [ ] Default sort order matches (or intentional difference is documented)
+- [ ] Global search for a known term returns the same record set as Nova
+- [ ] Each filter: applying in Filament returns the same record set as applying in Nova
+- [ ] Each sortable column: toggling sort in Filament returns same order as Nova
+- [ ] Detail/show page for a known record ID renders all fields without errors
+- [ ] Every field value on the detail page matches the Nova detail page for the same record
+- [ ] Create form: all required fields present; submitting with valid data creates the record (if write scope confirmed)
+- [ ] Create form: submitting with missing required fields returns validation errors
+- [ ] Edit form: opening an existing record pre-populates all fields correctly
+- [ ] Edit form: submitting a valid change persists correctly (if write scope confirmed)
+- [ ] Each action: authorized role sees the action button in the table and on the detail page
+- [ ] Each action: invoking the action produces the expected result (notification, redirect, download, etc.)
+- [ ] Each action with a confirmation modal: modal appears before execution
+- [ ] Each action with an action form: form fields render and validate correctly
+- [ ] Bulk actions: selecting multiple records and invoking a bulk action applies to all selected records
+- [ ] Each RelationManager tab renders without errors
+- [ ] Each RelationManager lists the correct related records
+- [ ] Each RelationManager: attaching/creating a related record works (if write scope confirmed)
+- [ ] Each RelationManager: detaching/deleting a related record works (if write scope confirmed)
+- [ ] Soft-delete: trashed records are hidden from the default list
+- [ ] Soft-delete: restore action restores the record
+- [ ] Soft-delete: force-delete action permanently removes the record
+- [ ] All Nova-related existing tests pass after migration (§13.3)
+- [ ] Policy registration verified for this resource (§10.1)
+- [ ] Browser MCP side-by-side comparison completed (§13.2)
+
+#### Human-verifiable (requires manual review)
+
+- [ ] Conditional field visibility behaves correctly for all role/state combinations (visually confirm in browser)
+- [ ] Restricted fields are hidden for unauthorized roles (confirm for each role in `migration/auth.md`)
+- [ ] Action buttons are absent for unauthorized roles (confirm for each role)
+- [ ] Relationship fields load correct options and are searchable where expected
+- [ ] Form UX feels equivalent — labels, placeholders, help text, field order
+- [ ] Date/time fields display in the correct format and timezone
+- [ ] Currency/number fields display with correct precision and formatting
+- [ ] File upload fields upload and display files correctly
+- [ ] Rich text / Markdown fields render content correctly
+- [ ] Navigation badge (if applicable) shows the correct count and color
+- [ ] Metric widgets (if applicable) display correct values and ranges
+- [ ] Any custom Nova Blade views or themes have an equivalent Filament implementation reviewed
+
+### 13.5 Performance review
+
+**Goal**: Match the efficiency of the existing Nova implementation — do not regress, but do not over-engineer either.
+
+**Before migrating each resource, note its existing approach:**
+```bash
+# Look at the Nova resource's indexQuery, detailQuery, relatableQuery
+grep -n "indexQuery\|detailQuery\|relatableQuery\|with(\|withCount(" app/Nova/YourResource.php
+```
+
+- If Nova used plain Eloquent with no eager loading customisation, implement Filament the same way and trust Filament's default query builder.
+- If Nova added specific `->with([...])` eager loads or `->withCount([...])` calls, replicate them in `getEloquentQuery()` (see §4.2) — they were there for a reason.
+- If Nova used highly customised raw queries or database-specific optimisations, read the comment or Git history to understand why before replicating, then aim for the same approach in Filament.
+
+**After migration, provide the user with this table of areas to review if they experience slowness on large tables:**
+
+| Area | What to check |
+|---|---|
+| List page N+1 | Add `->with([...])` in `getEloquentQuery()` for any relationship columns displayed in the table |
+| Search | Ensure searchable columns are indexed; avoid `LIKE '%term%'` on unindexed large text columns |
+| Filters | Check that filter query scopes use indexed columns; add DB indexes if needed |
+| RelationManagers | Each RelationManager issues its own query; add `->with()` if it displays nested relationships |
+| BelongsTo selects | Use `->searchable()->preload()` only for small reference tables; for large tables use `->searchable()` without preload to avoid loading all options at once (see §4.5 Map relationships) |
+| Metrics | Metric queries run on every dashboard load; ensure they use indexed columns and consider caching if the table is very large |
+
+---
+
+## Phase 14 — Cutover
+
+**Do not proceed with cutover automatically.** After all resources have passed verification, prompt the user:
+
+> "All resources have been migrated and verified. Would you like to proceed with cutover (switching Filament to the production path and removing Nova), or do you need more time for manual testing first?"
+
+Only proceed when the user explicitly confirms they are ready.
+
+**Cutover steps:**
+1. **Scan the codebase for hardcoded Nova URLs**: Search for `/nova` string literals throughout the project — they may appear in PHP, Blade, JavaScript, config files, and database seeders.
+   ```bash
+   grep -r "/nova" . --include="*.php" --include="*.blade.php" --include="*.js" --include="*.ts" --exclude-dir=vendor --exclude-dir=node_modules -l
+   ```
+2. Update the Filament panel path to the desired production URL:
+   ```php
+   ->path('admin')   // or whatever the user chooses
+   ```
+3. Remove Nova:
+   - Remove `nova/nova` from `composer.json` and run `composer update`.
+   - Remove `NovaServiceProvider` from `bootstrap/providers.php` (Laravel 11+) or `config/app.php`.
+   - Delete `app/Nova/` and `app/Providers/NovaServiceProvider.php`.
+   - Remove Nova config and assets: `config/nova.php`, `public/vendor/nova/`.
+   - Remove any `NOVA_*` environment variables from `.env` and `.env.example`.
+4. Redirect the old Nova URL to the new Filament URL:
+   ```php
+   Route::redirect('/nova', '/admin');
+   ```
+5. Clear all caches:
+   ```bash
+   php artisan optimize:clear
+   ```
+6. Run the full test suite.
+7. Deploy.
+
+---
+
+## Finding Plugins at Runtime
+
+When a Nova feature has no native Filament equivalent, do not rely on hardcoded package names. Instead, search at runtime to get current, accurate recommendations:
+
+1. Search [Packagist](https://packagist.org) for relevant terms (e.g., "filament money field", "filament slug", "filament morph").
+2. Search the [Filament plugin directory](https://filamentphp.com/plugins) for community-listed packages.
+3. Evaluate candidates by: total installs, most recent release date, Filament v5 compatibility statement, and open issue count.
+4. Recommend the most popular and actively maintained option.
+5. Confirm with the user before installing any package.
+
+---
+
+## Quick Reference: Nova vs Filament Artisan Commands
+
+| Purpose | Nova | Filament |
+|---|---|---|
+| Create resource | `php artisan nova:resource ModelName` | `php artisan make:filament-resource ModelName --generate` |
+| Create action | `php artisan nova:action ActionName` | Define inline on the resource or as a standalone class |
+| Create filter | `php artisan nova:filter FilterName` | Define inline on the resource |
+| Create lens | `php artisan nova:lens LensName` | `php artisan make:filament-page LensName` |
+| Create metric (Value) | `php artisan nova:value MetricName` | `php artisan make:filament-widget MetricName --stats-overview` |
+| Create metric (Trend/Partition) | `php artisan nova:trend MetricName` | `php artisan make:filament-widget MetricName --chart` |
+| Create dashboard | `php artisan nova:dashboard DashboardName` | `php artisan make:filament-page DashboardName --type=dashboard` |
+| Create custom tool | `php artisan nova:tool VendorName/ToolName` | `php artisan make:filament-page ToolName` |
+| Create relation manager | *(manual)* | `php artisan make:filament-relation-manager ResourceClass relation titleColumn` |
+| Install | `php artisan nova:install` | `php artisan filament:install --panels` |
+| Publish assets | `php artisan nova:publish` | `php artisan filament:assets` |
