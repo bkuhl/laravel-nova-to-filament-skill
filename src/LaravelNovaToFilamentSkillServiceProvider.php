@@ -9,7 +9,7 @@ class LaravelNovaToFilamentSkillServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->publishes([
-            __DIR__ . '/../skill.md' => base_path('skill.md'),
+            __DIR__ . '/../SKILL.md' => base_path('SKILL.md'),
         ], 'nova-to-filament-skill');
     }
 }

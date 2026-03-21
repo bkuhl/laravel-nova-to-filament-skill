@@ -45,37 +45,60 @@ This skill gives a Claude agent the detailed knowledge it needs to:
 
 ## Installation
 
+### Claude Code (recommended)
+
+Register this repository as a Claude Code plugin marketplace and install the skill directly:
+
+```bash
+/plugin marketplace add bkuhl/laravel-nova-to-filament-skill
+```
+
+Then install the skill:
+
+```bash
+/plugin install laravel-nova-to-filament@laravel-nova-to-filament-skill
+```
+
+Once installed, mention the skill in your Claude Code session and the agent will follow the migration workflow automatically.
+
+### Claude.ai
+
+Upload [`SKILL.md`](./SKILL.md) as a custom skill in Claude.ai by following the [Using skills in Claude](https://support.claude.com/en/articles/12512180-using-skills-in-claude#h_a4222fa77b) instructions.
+
+### Laravel project (Composer)
+
 Install the package into your Laravel project via Composer:
 
 ```bash
 composer require --dev bkuhl/laravel-nova-to-filament-skill
 ```
 
-Then publish `skill.md` to your project root:
+Then publish `SKILL.md` to your project root:
 
 ```bash
 php artisan vendor:publish --tag=nova-to-filament-skill
 ```
 
-This copies `skill.md` into the root of your Laravel project, making it ready to use with your AI coding agent.
+This copies `SKILL.md` into the root of your Laravel project, making it ready to use with your AI coding agent.
 
 ---
 
 ## How to use this skill
 
-1. After publishing, open `skill.md` in your project root and copy its entire contents.
-2. Paste the contents as a **system prompt** when starting a Claude session (or configure it as a Claude skill/agent instruction set).
-3. Point the agent at your Laravel project.
-4. The agent will walk through Phases 1–14 in `skill.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
+1. After installing (via any method above), the agent will have access to the skill's migration workflow.
+2. Point the agent at your Laravel project.
+3. The agent will walk through Phases 1–14 in `SKILL.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
 
 ---
 
 ## File structure
 
 ```
-skill.md    ← The skill itself: full agent instructions, component mapping, 
-              migration workflow, testing checklist, and plugin reference.
-README.md   ← This file: describes the skill's purpose and how to use it.
-src/        ← Laravel ServiceProvider that publishes skill.md via artisan.
-composer.json ← Package definition for Composer / Packagist.
+SKILL.md             ← The skill itself: YAML frontmatter + full agent instructions,
+                       component mapping, migration workflow, testing checklist, and
+                       plugin reference. Compatible with Anthropic's skills format.
+README.md            ← This file: describes the skill's purpose and how to install it.
+.claude-plugin/      ← Claude Code plugin manifest for marketplace installation.
+src/                 ← Laravel ServiceProvider that publishes SKILL.md via artisan.
+composer.json        ← Package definition for Composer / Packagist.
 ```

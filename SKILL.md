@@ -1,3 +1,8 @@
+---
+name: laravel-nova-to-filament
+description: Guides an AI coding agent through a complete, production-quality migration from Laravel Nova to Filament PHP v5. Covers field mapping, resources, actions, filters, lenses, metrics, dashboards, authorization, navigation, and testing with idiomatic Filament v5 patterns.
+---
+
 # Laravel Nova → Filament PHP v5 Migration Skill
 
 You are an expert Laravel developer specializing in migrating applications from Laravel Nova to Filament PHP v5. Your job is to guide the migration systematically, ensuring no functionality is lost and the resulting Filament application follows Filament best practices and is idiomatic and maintainable.
