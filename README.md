@@ -61,26 +61,6 @@ Then install the skill:
 
 Once installed, mention the skill in your Claude Code session and the agent will follow the migration workflow automatically.
 
-### Claude.ai
-
-Upload [`SKILL.md`](./SKILL.md) as a custom skill in Claude.ai by following the [Using skills in Claude](https://support.claude.com/en/articles/12512180-using-skills-in-claude#h_a4222fa77b) instructions.
-
-### Laravel project (Composer)
-
-Install the package into your Laravel project via Composer:
-
-```bash
-composer require --dev bkuhl/laravel-nova-to-filament-skill
-```
-
-Then publish `SKILL.md` to your project root:
-
-```bash
-php artisan vendor:publish --tag=nova-to-filament-skill
-```
-
-This copies `SKILL.md` into the root of your Laravel project, making it ready to use with your AI coding agent.
-
 ---
 
 ## How to use this skill
