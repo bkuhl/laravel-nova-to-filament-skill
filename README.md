@@ -4,6 +4,14 @@ A Claude AI skill (system prompt) that guides an AI coding agent through a **com
 
 ---
 
+## Installation
+
+```bash
+claude skill install github:bkuhl/laravel-nova-to-filament-skill
+```
+
+---
+
 ## Purpose
 
 Migrating an admin panel from Laravel Nova to Filament PHP is a non-trivial undertaking.  
@@ -41,17 +49,3 @@ This skill gives a Claude agent the detailed knowledge it needs to:
 | **Plugins** | Curated table of community plugins for capabilities without a built-in Filament equivalent |
 | **Artisan commands** | Nova vs Filament command reference |
 
----
-
-## Installation
-
-```bash
-claude skill install github:bkuhl/laravel-nova-to-filament-skill
-```
-
----
-
-## How to use this skill
-
-1. After installing, point Claude Code at your Laravel project.
-2. The agent will walk through Phases 1–14 in `SKILL.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
