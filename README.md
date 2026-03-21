@@ -88,17 +88,3 @@ This copies `SKILL.md` into the root of your Laravel project, making it ready to
 1. After installing (via any method above), the agent will have access to the skill's migration workflow.
 2. Point the agent at your Laravel project.
 3. The agent will walk through Phases 1–14 in `SKILL.md`, asking clarifying questions where needed, and producing idiomatic Filament v5 code.
-
----
-
-## File structure
-
-```
-SKILL.md             ← The skill itself: YAML frontmatter + full agent instructions,
-                       component mapping, migration workflow, testing checklist, and
-                       plugin reference. Compatible with Anthropic's skills format.
-README.md            ← This file: describes the skill's purpose and how to install it.
-.claude-plugin/      ← Claude Code plugin manifest for marketplace installation.
-src/                 ← Laravel ServiceProvider that publishes SKILL.md via artisan.
-composer.json        ← Package definition for Composer / Packagist.
-```
