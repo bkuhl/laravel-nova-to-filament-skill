@@ -836,19 +836,94 @@ class UserGrowthChart extends ChartWidget
 
 ### 8.4 Partition metric → ChartWidget (doughnut)
 
+Nova renders a Chartist donut (~90×90 px) on the right with an HTML `<ul>` legend on the left (always visible). The header shows the title plus `(N total)`. Legend entries read `Label (value - %%)`. Colors come from a fixed-index palette (`colorForIndex`). When the total is zero or negative, Nova hides the chart area but still shows the legend list.
+
+Filament uses a single Chart.js canvas where the legend is a built-in plugin. The goal is visual consistency: compact chart, left-aligned legend with the same label format, matching color order, and the total in the heading.
+
+#### Base widget setup
+
 ```php
 protected function getType(): string { return 'doughnut'; }
 ```
 
-**Keep showing the total**: Nova Partition metrics display a total alongside the breakdown. Preserve this in Filament by computing the total from the dataset and displaying it in the widget heading or description. For example:
+#### Keep showing the total
+
+Nova Partition metrics display `(N total)` next to the title. Preserve this in Filament by computing the total from the dataset and displaying it via `getHeading()`:
 
 ```php
 public function getHeading(): string
 {
-    $total = array_sum(array_column($this->getData()['datasets'][0]['data'] ?? [], null));
+    $total = array_sum($this->getData()['datasets'][0]['data'] ?? []);
     return "Orders by Status ({$total} total)";
 }
 ```
+
+#### Label format — match Nova's `Label (count - pct%)`
+
+Build labels that mirror Nova's legend text. Each label should read `Label (count - pct%)`:
+
+```php
+// Inside getData()
+$total = array_sum($counts);
+$labels = collect($counts)->map(function ($count, $label) use ($total) {
+    $pct = $total > 0 ? round($count / $total * 100) : 0;
+    return "{$label} ({$count} - {$pct}%)";
+})->values()->all();
+```
+
+Pass `$labels` as the chart labels and `array_values($counts)` as the dataset data.
+
+#### Colors — replicate Nova's fixed-index palette
+
+Use Nova's `colorForIndex` hex order so slices keep the same colors users expect:
+
+```php
+'backgroundColor' => ['#F5573B', '#F99037', '#F2CB22', '#8FC15D', '#098F56', '#47C9E5', '#3C82F7', '#7C5CFC', '#F27FB8', ...],
+```
+
+If the original Nova metric uses semantic / hardcoded colors (e.g., status-specific), preserve those instead of the index palette.
+
+#### Chart.js options — compact, left legend
+
+```php
+protected function getOptions(): RawJs
+{
+    return RawJs::make(<<<'JS'
+    {
+        cutout: '70%',
+        plugins: {
+            legend: {
+                position: 'left',
+                labels: {
+                    usePointStyle: true,
+                    pointStyle: 'circle',
+                },
+            },
+        },
+        layout: {
+            padding: 0,
+        },
+    }
+    JS);
+}
+```
+
+Set `borderWidth: 0` on the dataset to remove slice borders (Nova's donut has none).
+
+#### Handling empty / all-zero data
+
+Nova hides the donut when the total ≤ 0 but still shows the legend list. Chart.js cannot natively separate the legend from the chart on a single canvas. When all values are zero, include a single placeholder slice so the chart still renders:
+
+```php
+if ($total <= 0) {
+    return [
+        'datasets' => [['data' => [0], 'backgroundColor' => ['#D1D5DB'], 'borderWidth' => 0]],
+        'labels'   => ['None (0 - 0%)'],
+    ];
+}
+```
+
+> **Note:** True Nova behavior (hidden donut + visible list) is not native to Chart.js's single-canvas model. The placeholder-slice approach above is an acceptable trade-off. If pixel-perfect parity is required later, add a separate HTML legend alongside a donut-only canvas.
 
 ### 8.5 Dashboards → Filament Dashboard page
 
