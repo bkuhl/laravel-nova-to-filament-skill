@@ -478,9 +478,57 @@ public static function getRelations(): array
 }
 ```
 
-### 4.6 Map Nova's `cards()` (detail view cards) → Filament infolists
+### 4.6 Map Nova detail view → Filament `infolist()`
 
-Nova's `cards()` on the detail page → Filament's `infolist()` using `Infolist` schema components:
+Nova's detail (show) page displays fields in a label-left / value-right layout with horizontal dividers between rows and tight section padding. The Filament `infolist()` must reproduce this layout so the view page feels identical to Nova.
+
+**Layout rules for every `infolist()`:**
+1. Set `->columns(1)` on each `Section` so entries stack vertically (one field per row, like Nova).
+2. Apply `->columns(['sm' => 2])` on each entry (or use a wrapping `Grid`) so the label sits in the left column and the value in the right column — matching Nova's two-column detail layout.
+3. Add `->separator()` on entries to render a horizontal divider between rows, matching Nova's row borders.
+4. Use `->compact()` on each `Section` to reduce vertical padding, matching Nova's tighter spacing.
+
+**Standard pattern — mirror Nova detail panels:**
+```php
+use Filament\Infolists\Infolist;
+use Filament\Infolists\Components\Section;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Infolists\Components\Grid;
+
+public static function infolist(Infolist $infolist): Infolist
+{
+    return $infolist->schema([
+        Section::make('Contact Information')
+            ->compact()
+            ->columns(1)
+            ->schema([
+                TextEntry::make('name')
+                    ->columns(['sm' => 2])
+                    ->separator(),
+                TextEntry::make('email')
+                    ->columns(['sm' => 2])
+                    ->separator(),
+                TextEntry::make('phone')
+                    ->columns(['sm' => 2]),
+            ]),
+
+        Section::make('Order Summary')
+            ->compact()
+            ->columns(1)
+            ->schema([
+                TextEntry::make('total')
+                    ->money('usd')
+                    ->columns(['sm' => 2])
+                    ->separator(),
+                TextEntry::make('status')
+                    ->badge()
+                    ->columns(['sm' => 2]),
+            ]),
+    ]);
+}
+```
+
+**Migrating Nova `cards()` on the detail page** — convert each card into a `Section` inside the `infolist()` following the same layout rules above:
 
 ```php
 // Nova
@@ -491,17 +539,15 @@ public function cards(NovaRequest $request)
     ];
 }
 
-// Filament: override infolist() on the resource
-public static function infolist(Infolist $infolist): Infolist
-{
-    return $infolist->schema([
-        Section::make('Order Summary')->schema([
-            TextEntry::make('total')->money('usd'),
-            TextEntry::make('status')->badge(),
-        ]),
-    ]);
-}
+// Filament: add as a section in infolist() using the standard layout
+// (see pattern above)
 ```
+
+**Key points:**
+- Every `Section` must use `->compact()->columns(1)`.
+- Every entry inside a section must use `->columns(['sm' => 2])` for the label/value split.
+- Add `->separator()` on every entry except the last in each section to produce row dividers.
+- This applies to **all** resources — it is not optional styling but a required migration pattern to match the Nova detail page appearance.
 
 ---
 
@@ -1070,6 +1116,7 @@ Record this checklist in `migration/progress.md` for each resource. Check off ea
 - [ ] Each filter: applying in Filament returns the same record set as applying in Nova
 - [ ] Each sortable column: toggling sort in Filament returns same order as Nova
 - [ ] Detail/show page for a known record ID renders all fields without errors
+- [ ] Detail/show page uses label-left / value-right layout with row dividers and compact sections (§4.6)
 - [ ] Every field value on the detail page matches the Nova detail page for the same record
 - [ ] Create form: all required fields present; submitting with valid data creates the record (if write scope confirmed)
 - [ ] Create form: submitting with missing required fields returns validation errors
