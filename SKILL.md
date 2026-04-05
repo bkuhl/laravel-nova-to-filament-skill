@@ -818,8 +818,21 @@ class UserGrowthChart extends ChartWidget
     }
 
     protected function getType(): string { return 'line'; }
+
+    protected function getOptions(): RawJs
+    {
+        return RawJs::make('{
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { display: false },
+                y: { min: 0 },
+            },
+        }');
+    }
 }
 ```
+
+> **Always hide the legend, x-axis labels, and prevent negative y-axis** on Trend (line) chart widgets. Nova Trends never displayed these, so omitting them preserves parity.
 
 ### 8.4 Partition metric → ChartWidget (doughnut)
 
