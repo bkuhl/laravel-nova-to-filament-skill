@@ -781,6 +781,16 @@ class UserGrowthChart extends ChartWidget
 protected function getType(): string { return 'doughnut'; }
 ```
 
+**Keep showing the total**: Nova Partition metrics display a total alongside the breakdown. Preserve this in Filament by computing the total from the dataset and displaying it in the widget heading or description. For example:
+
+```php
+public function getHeading(): string
+{
+    $total = array_sum(array_column($this->getData()['datasets'][0]['data'] ?? [], null));
+    return "Orders by Status ({$total} total)";
+}
+```
+
 ### 8.5 Dashboards → Filament Dashboard page
 
 Nova dashboards map to Filament's default Dashboard page with widgets. Register widgets on the panel:
